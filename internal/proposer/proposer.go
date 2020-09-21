@@ -324,7 +324,6 @@ func (p *proposer) VoteForBlocks() {
 				p.log.Info("blockchain not synced... trying to vote in 5 seconds")
 				continue
 			}
-
 			s := p.chain.State()
 
 			voteState, err := s.TipStateAtSlot(slotToVote)
@@ -344,8 +343,11 @@ func (p *proposer) VoteForBlocks() {
 			p.log.Debugf("committing for slot %d with %d validators", slotToVote, len(validators))
 
 			toEpoch := (slotToVote - 1) / p.params.EpochLength
+			p.log.Debugf("VoteForBlocks---1 toEpoch %d", toEpoch)
 
 			beaconBlock, found := s.Chain().GetNodeBySlot(slotToVote - 1)
+			p.log.Debugf("VoteForBlocks---2 GetNodeBySlot== %v", beaconBlock)
+
 			if !found {
 				p.log.Errorf("unable to find block at slot %d", slotToVote-1)
 				voteTimer = time.NewTimer(time.Until(p.getNextVoteTime(slotToVote)))
@@ -362,11 +364,14 @@ func (p *proposer) VoteForBlocks() {
 				Nonce:           p.lastActionManager.GetNonce(),
 			}
 
+			p.log.Debugf("VoteForBlocks---3 voteData== %v", data)
+
 			dataHash := data.Hash()
 
 			var signatures []*bls.Signature
 
 			bitlistVotes := bitfield.NewBitlist(uint64(len(validators)))
+			p.log.Debugf("VoteForBlocks---4 bitlistVotes== %v", bitlistVotes)
 
 			validatorRegistry := voteState.GetValidatorRegistry()
 			for i, index := range validators {
@@ -387,6 +392,7 @@ func (p *proposer) VoteForBlocks() {
 
 			if len(signatures) > 0 {
 				sig := bls.AggregateSignatures(signatures)
+				p.log.Debugf("VoteForBlocks---5 AggregateSignatures== %v", sig)
 
 				var voteSig [96]byte
 				copy(voteSig[:], sig.Marshal())

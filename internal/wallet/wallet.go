@@ -75,11 +75,7 @@ type wallet struct {
 
 // NewWallet creates a new wallet.
 func NewWallet(ctx context.Context, log logger.Logger, path string, params *params.ChainParams, ch chain.Blockchain, hostnode hostnode.HostNode, mempool mempool.CoinsMempool, actionMempool mempool.ActionMempool) (Wallet, error) {
-	var txTopic *pubsub.Topic
-	var depositTopic *pubsub.Topic
-	var depositsTopic *pubsub.Topic
-	var exitTopic *pubsub.Topic
-	var exitsTopic *pubsub.Topic
+	var txTopic, depositTopic, depositsTopic, exitTopic, exitsTopic *pubsub.Topic
 	var err error
 	if hostnode != nil {
 		txTopic, err = hostnode.Topic(p2p.MsgTxCmd)
@@ -107,6 +103,7 @@ func NewWallet(ctx context.Context, log logger.Logger, path string, params *para
 			return nil, err
 		}
 	}
+
 	wall := &wallet{
 		log:           log,
 		directory:     path,
