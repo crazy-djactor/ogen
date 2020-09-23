@@ -170,6 +170,7 @@ func (ch *blockchain) ProcessBlock(block *primitives.Block) error {
 	}
 
 	if time.Now().Add(time.Second * 2).Before(blockTime) {
+		ch.log.Infof("block %d processed at %s, but should wait until %s", block.Header.Slot, time.Now(), blockTime)
 		return fmt.Errorf("block %d processed at %s, but should wait until %s", block.Header.Slot, time.Now(), blockTime)
 	}
 
@@ -212,7 +213,7 @@ func (ch *blockchain) ProcessBlock(block *primitives.Block) error {
 			return err
 		}
 
-		row, err := ch.state.Index().Add(*block)
+		row, err := ch.State().Index().Add(*block)
 		if err != nil {
 			return err
 		}
@@ -233,7 +234,7 @@ func (ch *blockchain) ProcessBlock(block *primitives.Block) error {
 				return err
 			}
 
-			ch.state.SetLatestVotesIfNeeded(validators, a)
+			ch.State().SetLatestVotesIfNeeded(validators, a)
 		}
 
 		// TODO: remove when we have fork choice
@@ -251,7 +252,7 @@ func (ch *blockchain) ProcessBlock(block *primitives.Block) error {
 		if err != nil {
 			return err
 		}
-		finalizedState, found := ch.state.GetStateForHash(finalizedHash)
+		finalizedState, found := ch.State().GetStateForHash(finalizedHash)
 		if !found {
 			return fmt.Errorf("could not find finalized state with hash %s in state map", finalizedHash)
 		}
@@ -283,8 +284,8 @@ func (ch *blockchain) ProcessBlock(block *primitives.Block) error {
 
 		// TODO: delete state before finalized
 
-		ch.log.Debugf("processed %d votes %d deposits %d exits and %d transactions", len(block.Votes), len(block.Deposits), len(block.Exits), len(block.Txs))
-		ch.log.Debugf("included %d vote slashing %d randao slashing %d proposer slashing", len(block.VoteSlashings), len(block.RANDAOSlashings), len(block.ProposerSlashings))
+		ch.log.Infof("processed %d votes %d deposits %d exits and %d transactions", len(block.Votes), len(block.Deposits), len(block.Exits), len(block.Txs))
+		ch.log.Infof("included %d vote slashing %d randao slashing %d proposer slashing", len(block.VoteSlashings), len(block.RANDAOSlashings), len(block.ProposerSlashings))
 		ch.log.Infof("new block at slot: %d with %d finalized and %d justified", block.Header.Slot, newState.GetFinalizedEpoch(), newState.GetJustifiedEpoch())
 
 		// TODO: add a log that shows network participation with expected.

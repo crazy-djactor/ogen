@@ -184,7 +184,12 @@ func (p *proposer) ProposeBlocks() {
 
 			slotIndex := (slotToPropose + p.params.EpochLength - 1) % p.params.EpochLength
 			proposerIndex := voteState.GetProposerQueue()[slotIndex]
+			proposerQue := voteState.GetProposerQueue()
 			proposer := voteState.GetValidatorRegistry()[proposerIndex]
+
+			p.log.Infof("Propose Block[%d] [%d] == ProposerQueue %v", slotIndex, proposerIndex, proposerQue)
+			p.log.Infof("Propose Block [%v]", proposer.PubKey)
+			p.log.Infof("proposing for slot %d", slotToPropose)
 
 			if k, found := p.keystore.GetValidatorKey(proposer.PubKey); found {
 
@@ -192,8 +197,7 @@ func (p *proposer) ProposeBlocks() {
 				//	blockTimer = time.NewTimer(time.Until(p.getNextBlockTime(slotToPropose)))
 				//	continue
 				//}
-
-				p.log.Infof("proposing for slot %d", slotToPropose)
+				p.log.Infof("Propose Block ValidatorKey found %v", k)
 
 				votes, err := p.voteMempool.Get(slotToPropose, voteState, p.params, proposerIndex)
 				if err != nil {
@@ -201,6 +205,7 @@ func (p *proposer) ProposeBlocks() {
 					blockTimer = time.NewTimer(time.Until(p.getNextBlockTime(slotToPropose)))
 					continue
 				}
+				p.log.Infof("p.voteMempool.Get[proposerIndex=%d] %v", proposerIndex, votes)
 
 				depositTxs, voteState, err := p.actionsMempool.GetDeposits(int(p.params.MaxDepositsPerBlock), voteState)
 				if err != nil {
@@ -208,6 +213,8 @@ func (p *proposer) ProposeBlocks() {
 					blockTimer = time.NewTimer(time.Until(p.getNextBlockTime(slotToPropose)))
 					continue
 				}
+
+				p.log.Infof("p.actionsMempool.GetDeposits[proposerIndex=%d] %v", proposerIndex, votes)
 
 				coinTxs, voteState := p.coinsMempool.Get(p.params.MaxTxsPerBlock, voteState)
 
@@ -220,12 +227,14 @@ func (p *proposer) ProposeBlocks() {
 					continue
 				}
 
+				p.log.Infof("p.coinsMempool actionsMempool (%v, %v, %v)", coinTxs, coinTxMulti, exitTxs)
 				randaoSlashings, err := p.actionsMempool.GetRANDAOSlashings(int(p.params.MaxRANDAOSlashingsPerBlock), voteState)
 				if err != nil {
 					p.log.Error(err)
 					blockTimer = time.NewTimer(time.Until(p.getNextBlockTime(slotToPropose)))
 					continue
 				}
+				p.log.Infof("p.actionsMempool.GetRANDAOSlashing %d)", randaoSlashings)
 
 				voteSlashings, err := p.actionsMempool.GetVoteSlashings(int(p.params.MaxVoteSlashingsPerBlock), voteState)
 				if err != nil {
@@ -233,13 +242,14 @@ func (p *proposer) ProposeBlocks() {
 					blockTimer = time.NewTimer(time.Until(p.getNextBlockTime(slotToPropose)))
 					continue
 				}
-
+				p.log.Infof("p.actionsMempool.GetVoteSlashing %d)", voteSlashings)
 				proposerSlashings, err := p.actionsMempool.GetProposerSlashings(int(p.params.MaxProposerSlashingsPerBlock), voteState)
 				if err != nil {
 					p.log.Error(err)
 					blockTimer = time.NewTimer(time.Until(p.getNextBlockTime(slotToPropose)))
 					continue
 				}
+				p.log.Infof("p.actionsMempool.GetProposerSlashing %d)", proposerSlashings)
 
 				governanceVotes, err := p.actionsMempool.GetGovernanceVotes(int(p.params.MaxGovernanceVotesPerBlock), voteState)
 				if err != nil {
@@ -247,6 +257,8 @@ func (p *proposer) ProposeBlocks() {
 					blockTimer = time.NewTimer(time.Until(p.getNextBlockTime(slotToPropose)))
 					continue
 				}
+
+				p.log.Infof("p.actionsMempool.GetGovernanceVotes %d)", governanceVotes)
 
 				block := primitives.Block{
 					Header: &primitives.BlockHeader{
@@ -292,17 +304,27 @@ func (p *proposer) ProposeBlocks() {
 					blockTimer = time.NewTimer(time.Until(p.getNextBlockTime(slotToPropose)))
 					continue
 				}
+				p.log.Infof("***ProcessBlock => publishBlock [slot: %d, prev: %v, hash: %v]",
+					slotToPropose, tipHash, blockHash)
 
 				go p.publishBlock(&block)
 			}
 
 			slotToPropose++
 			blockTimer = time.NewTimer(time.Until(p.getNextBlockTime(slotToPropose)))
+			p.log.Infof("***ProcessBlock => NextPropose [slot: %d, next time: %v]",
+				slotToPropose, p.GetMilliSeconds(p.getNextBlockTime(slotToPropose)))
+
 		case <-p.context.Done():
 			p.log.Info("stopping proposer")
 			return
 		}
 	}
+}
+
+func (p *proposer) GetMilliSeconds(mtime time.Time) int64 {
+	timeStamp := mtime.UnixNano() / int64(time.Millisecond)
+	return timeStamp
 }
 
 func (p *proposer) VoteForBlocks() {
@@ -311,14 +333,19 @@ func (p *proposer) VoteForBlocks() {
 		slotToVote = 1
 	}
 
+	//return p.chain.GenesisTime().Add(time.Duration(nextSlot*p.params.SlotDuration) * time.Second).Add(-time.Second * time.Duration(p.params.SlotDuration) / 2)
 	voteTimer := time.NewTimer(time.Until(p.getNextVoteTime(slotToVote)))
-
+	p.log.Info("Vote For Blocks == Started %v", p.params)
 	for {
 		select {
 		case <-voteTimer.C:
-
 			// Check if we're an attester for this slot
-			p.log.Infof("sending votes for slot %d", slotToVote)
+			toEpoch := (slotToVote - 1) / p.params.EpochLength
+			slotinEpoch := (slotToVote - 1) % p.params.EpochLength
+			timeStamp := p.GetMilliSeconds(time.Now())
+
+			p.log.Infof("[%d] epoch:[%d-%d] sending votes for slot %d", timeStamp,
+				toEpoch, slotinEpoch, slotToVote)
 			if p.hostnode.PeersConnected() == 0 || p.hostnode.Syncing() {
 				voteTimer = time.NewTimer(time.Second * 5)
 				p.log.Info("blockchain not synced... trying to vote in 5 seconds")
@@ -327,26 +354,29 @@ func (p *proposer) VoteForBlocks() {
 			s := p.chain.State()
 
 			voteState, err := s.TipStateAtSlot(slotToVote)
+
+			p.log.Infof("voteState for slot %d %v", slotToVote, s)
 			if err != nil {
 				p.log.Errorf("unable to get tip at slot %d", slotToVote)
 				voteTimer = time.NewTimer(time.Until(p.getNextVoteTime(slotToVote)))
 				continue
 			}
 
+			currentEpochAssignment := voteState.GetCurrentEpochAssignments(slotToVote, p.params)
 			validators, err := voteState.GetVoteCommittee(slotToVote, p.params)
+			p.log.Infof("Assigned validators For this epoch = %d %v",
+				len(currentEpochAssignment), currentEpochAssignment)
+
+			p.log.Infof("VoteCommittee for this slot %d %v", slotToVote, validators)
 			if err != nil {
 				p.log.Errorf("error getting vote committee: %s", err.Error())
 				voteTimer = time.NewTimer(time.Until(p.getNextVoteTime(slotToVote)))
 				continue
 			}
 
-			p.log.Debugf("committing for slot %d with %d validators", slotToVote, len(validators))
-
-			toEpoch := (slotToVote - 1) / p.params.EpochLength
-			p.log.Debugf("VoteForBlocks---1 toEpoch %d", toEpoch)
+			p.log.Infof("VoteForBlocks---1 toEpoch %d", toEpoch)
 
 			beaconBlock, found := s.Chain().GetNodeBySlot(slotToVote - 1)
-			p.log.Debugf("VoteForBlocks---2 GetNodeBySlot== %v", beaconBlock)
 
 			if !found {
 				p.log.Errorf("unable to find block at slot %d", slotToVote-1)
@@ -364,14 +394,13 @@ func (p *proposer) VoteForBlocks() {
 				Nonce:           p.lastActionManager.GetNonce(),
 			}
 
-			p.log.Debugf("VoteForBlocks---3 voteData== %v", data)
+			p.log.Infof("VoteForBlocks---3 voteData== %v", data)
 
 			dataHash := data.Hash()
 
 			var signatures []*bls.Signature
 
 			bitlistVotes := bitfield.NewBitlist(uint64(len(validators)))
-			p.log.Debugf("VoteForBlocks---4 bitlistVotes== %v", bitlistVotes)
 
 			validatorRegistry := voteState.GetValidatorRegistry()
 			for i, index := range validators {
@@ -389,13 +418,15 @@ func (p *proposer) VoteForBlocks() {
 				bitlistVotes.Set(uint(i))
 				//}
 			}
+			p.log.Infof("VoteForBlocks---4 bitlistVotes== %v", bitlistVotes)
 
 			if len(signatures) > 0 {
 				sig := bls.AggregateSignatures(signatures)
-				p.log.Debugf("VoteForBlocks---5 AggregateSignatures== %v", sig)
 
 				var voteSig [96]byte
 				copy(voteSig[:], sig.Marshal())
+
+				p.log.Infof("VoteForBlocks---5 AggregateSignatures== %v", voteSig)
 
 				vote := &primitives.MultiValidatorVote{
 					Data:                  data,
@@ -415,7 +446,15 @@ func (p *proposer) VoteForBlocks() {
 
 			slotToVote++
 
-			voteTimer = time.NewTimer(time.Until(p.getNextVoteTime(slotToVote)))
+			nextTime := p.getNextVoteTime(slotToVote)
+			timeStamp = nextTime.UnixNano()
+			timeStamp = timeStamp / int64(time.Millisecond)
+
+			//voteTimer = time.NewTimer(time.Until(p.getNextVoteTime(slotToVote)))
+			voteTimer = time.NewTimer(time.Until(nextTime))
+			p.log.Infof("genesis[%d] duration[%d] Next VoteTimer for epoch:[%d-%d]===Timer[%d]",
+				p.chain.GenesisTime(), p.params.SlotDuration, toEpoch, slotinEpoch, timeStamp)
+
 		case <-p.context.Done():
 			p.log.Info("stopping voter")
 			return

@@ -32,6 +32,7 @@ type State interface {
 	IsRANDAOSlashingValid(rs *primitives.RANDAOSlashing) (uint64, error)
 	ApplyRANDAOSlashing(rs *primitives.RANDAOSlashing, p *params.ChainParams) error
 	GetVoteCommittee(slot uint64, p *params.ChainParams) ([]uint64, error)
+	GetCurrentEpochAssignments(slot uint64, p *params.ChainParams) []uint64
 	IsExitValid(exit *primitives.Exit) error
 	ApplyExit(exit *primitives.Exit) error
 	IsDepositValid(deposit *primitives.Deposit, params *params.ChainParams) error

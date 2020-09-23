@@ -470,6 +470,17 @@ func (s *state) ApplyRANDAOSlashing(rs *primitives.RANDAOSlashing, p *params.Cha
 	return s.UpdateValidatorStatus(proposer, primitives.StatusExitedWithPenalty, p)
 }
 
+func (s *state) GetCurrentEpochAssignments(slot uint64, p *params.ChainParams) []uint64 {
+	if (slot-1)/p.EpochLength == s.EpochIndex {
+		assignments := s.CurrentEpochVoteAssignments
+		return assignments
+	} else if (slot-1)/p.EpochLength == s.EpochIndex-1 {
+		assignments := s.PreviousEpochVoteAssignments
+		return assignments
+	}
+	return nil
+}
+
 // GetVoteCommittee gets the committee for a certain block.
 func (s *state) GetVoteCommittee(slot uint64, p *params.ChainParams) ([]uint64, error) {
 
@@ -478,6 +489,7 @@ func (s *state) GetVoteCommittee(slot uint64, p *params.ChainParams) ([]uint64, 
 		slotIndex := uint64(slot % p.EpochLength)
 		min := (slotIndex * uint64(len(assignments))) / p.EpochLength
 		max := ((slotIndex + 1) * uint64(len(assignments))) / p.EpochLength
+
 		return assignments[min:max], nil
 
 	} else if (slot-1)/p.EpochLength == s.EpochIndex-1 {

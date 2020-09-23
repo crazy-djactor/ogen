@@ -328,7 +328,6 @@ func (am *actionMempool) GetDeposits(num int, withState state.State) ([]*primiti
 	}
 
 	am.deposits = newMempool
-
 	return deposits, withState, nil
 }
 
