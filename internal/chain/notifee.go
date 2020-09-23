@@ -14,8 +14,7 @@ type BlockchainNotifee interface {
 	ProposerSlashingConditionViolated(slashing *primitives.ProposerSlashing)
 }
 
-// Notify registers a n.
-//otifee to be notified.
+// Notify registers a notifee to be notified.
 func (ch *blockchain) Notify(n BlockchainNotifee) {
 	ch.notifeeLock.Lock()
 	defer ch.notifeeLock.Unlock()

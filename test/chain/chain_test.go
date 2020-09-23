@@ -160,7 +160,6 @@ func createServers() {
 				LogFile:      false,
 				Pprof:        false,
 			}
-			params.SlotDuration = 4
 			s, err := server.NewServer(context.Background(), config, log, params, db, initParams)
 			if err != nil {
 				panic(err)
@@ -387,10 +386,10 @@ func TestValidatorsIncrease(t *testing.T) {
 func TestChainCorrectnessWithMoreValidators(t *testing.T) {
 	for {
 		time.Sleep(time.Second * 1)
-		if servers[0].Chain().State().TipState().GetSlot() == 152 {
+		if servers[0].Chain().State().TipState().GetSlot() == 56 {
 			for _, n := range notifies {
-				assert.Equal(t, n.lastJustified, uint64(28))
-				assert.Equal(t, n.lastFinalized, uint64(27))
+				assert.Equal(t, n.lastJustified, uint64(9))
+				assert.Equal(t, n.lastFinalized, uint64(8))
 				assert.False(t, n.slashed)
 			}
 			break
@@ -406,10 +405,10 @@ func TestStopProposers(t *testing.T) {
 func TestChainCorrectnessWithValidatorsPenalization(t *testing.T) {
 	for {
 		time.Sleep(time.Second * 1)
-		if servers[0].Chain().State().TipState().GetSlot() == 190 {
+		if servers[0].Chain().State().TipState().GetSlot() == 86 {
 			for _, n := range notifies {
-				assert.Equal(t, n.lastJustified, uint64(34))
-				assert.Equal(t, n.lastFinalized, uint64(33))
+				assert.Equal(t, n.lastJustified, uint64(15))
+				assert.Equal(t, n.lastFinalized, uint64(14))
 			}
 			break
 		}
