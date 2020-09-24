@@ -7,7 +7,6 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"fmt"
-	"github.com/multiformats/go-multiaddr"
 	"github.com/olympus-protocol/ogen/api/proto"
 	"github.com/olympus-protocol/ogen/internal/blockdb"
 	"github.com/olympus-protocol/ogen/internal/chainindex"
@@ -140,7 +139,7 @@ func createServers() {
 			defer wg.Done()
 			log := loggers[index]
 			params.SlotDuration = 4
-			db, err := blockdb.NewBlockDB(folder, params, log)
+			db, err := blockdb.NewBadgerDB(folder, params, log)
 			if err != nil {
 				panic(err)
 			}
