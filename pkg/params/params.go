@@ -1,7 +1,23 @@
 package params
 
 import (
+	"fmt"
+	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/olympus-protocol/ogen/pkg/chainhash"
+	"math"
+)
+
+const (
+	mayor = 0
+	minor = 1
+	patch = 0
+)
+
+var (
+	VersionNumber = (mayor * 100000) + (minor * 1000) + (patch * 10)
+	Version       = fmt.Sprintf("%d.%d.%d", mayor, minor, patch)
+
+	SyncProtocolID = protocol.ID("/ogen/sync/" + Version)
 )
 
 // AccountPrefixes are prefixes used for account bech32 encoding.
@@ -46,9 +62,8 @@ type ChainParams struct {
 	CommunityOverrideQuotient    uint64
 	VotingPeriodSlots            uint64
 	InitialManagers              [][20]byte
-
-	ChainFileHash chainhash.Hash
-	ChainFileURL  string
+	RendevouzStrings             map[int]string
+	Relayers                     map[string]string
 }
 
 // Mainnet are chain parameters used for the main network.
@@ -101,9 +116,10 @@ var Mainnet = ChainParams{
 		{},
 		{},
 	},
+	RendevouzStrings: map[int]string{
+		0: "do_not_go_gentle_into_that_good_night",
+	},
 }
-
-var testnetChainFileHash, _ = chainhash.NewHashFromStr("e1fd92067e16e245b6e4cd0d584638f866838f4d07580016707ba18b4d985dbb")
 
 // TestNet are chain parameters used for the testnet.
 var TestNet = ChainParams{
@@ -128,8 +144,6 @@ var TestNet = ChainParams{
 	UnitsPerCoin:                 100000000,
 	InactivityPenaltyQuotient:    17179869184,
 	SlotDuration:                 30,
-	ChainFileHash:                *testnetChainFileHash,
-	ChainFileURL:                 "https://public.oly.tech/olympus/testnet/chain.json",
 	MaxVotesPerBlock:             32,
 	MaxTxsPerBlock:               5000,
 	MaxTxsMultiPerBlock:          128,
@@ -156,4 +170,27 @@ var TestNet = ChainParams{
 		{143, 17, 152, 250, 184, 122, 141, 208, 109, 72, 148, 187, 248, 89, 83, 127, 113, 217, 23, 144}, // tlpub13uge374c02xaqm2gjjalsk2n0acaj9uswmr687
 		{162, 207, 33, 52, 96, 81, 17, 131, 72, 175, 180, 222, 125, 41, 3, 108, 43, 47, 231, 7},         // tlpub15t8jzdrq2ygcxj90kn0862grds4jlec8tjcg6j
 	},
+	RendevouzStrings: map[int]string{
+		0: "do_not_go_gentle_into_that_good_night",
+	},
+	Relayers: map[string]string{
+		"cronos-1": "/ip4/134.122.28.156/tcp/25000/p2p/12D3KooWDbvbYMzEvRi5CECVHawadaaZLich93GRhaCRRxQHFVcN",
+		"cronos-2": "/ip4/159.65.233.200/tcp/25000/p2p/12D3KooWBdwHS4aLQmfzhddfsT3aV9YA8Cy47VWx8ckoYkC8Vwb4",
+	},
+}
+
+// GetRendevouzString is a function to return a rendevouz string for a certain version range
+// to make sure peers find each other depending on their version.
+func (p *ChainParams) GetRendevouzString() string {
+	ver := VersionNumber
+	var selectedIndex int
+	var diffSelected int
+	for n := range p.RendevouzStrings {
+		diff := int(math.Abs(float64(ver - n)))
+		if diff < diffSelected {
+			selectedIndex = n
+			diffSelected = diff
+		}
+	}
+	return p.RendevouzStrings[selectedIndex]
 }

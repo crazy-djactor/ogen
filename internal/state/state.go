@@ -1,10 +1,12 @@
 package state
 
 import (
+	"fmt"
 	"github.com/olympus-protocol/ogen/pkg/bitfield"
 	"github.com/olympus-protocol/ogen/pkg/chainhash"
 	"github.com/olympus-protocol/ogen/pkg/params"
 	"github.com/olympus-protocol/ogen/pkg/primitives"
+	_ "strings"
 )
 
 // ValidatorsInfo returns the state validators information.
@@ -61,12 +63,10 @@ type state struct {
 	PreviousEpochVoteAssignments []uint64
 	CurrentEpochVoteAssignments  []uint64
 
-	// NextProposerQueue is the queue of validators scheduled to create a block
-	// in the next epoch.
+	// NextProposerQueue is the queue of validators scheduled to create a block in the next epoch.
 	NextProposerQueue []uint64
 
-	// JustifiedBitfield is a bitfield where the nth least significant bit
-	// represents whether the nth last epoch was justified.
+	// JustifiedBitfield is a bitfield where the nth least significant bit represents whether the nth last epoch was justified.
 	JustificationBitfield uint64
 
 	// FinalizedEpoch is the epoch that was finalized.
@@ -370,4 +370,16 @@ func NewState(cs primitives.CoinsState, gs primitives.Governance, validators []*
 
 func NewEmptyState() State {
 	return new(state)
+}
+
+// ToSerializable converts the struct to a serializable struct
+func (s *state) ToString() string {
+	totalStr := fmt.Sprintf("{ Slot: [%d], EpochIndex: [%d], {PreviousEpochVoteAssignments: [%v], "+
+		"CurrentEpochVoteAssignments: [%v]}, NextProposerQueue: [%v], FianlizedEpoch: [%d],"+
+		"{JustifiedEpoch: [%d], JustifiedEpochHash:[%v]}, {PreviousJustifiedEpoch: [%d], PreviousJustifiedEpochHash: [%d]},"+
+		" VoteEpoch: [%d], VoteEpochStartSlot: [%d]",
+		s.Slot, s.EpochIndex, s.PreviousEpochVoteAssignments,
+		s.CurrentEpochVoteAssignments, s.NextProposerQueue, s.FinalizedEpoch, s.JustifiedEpoch, s.JustifiedEpochHash,
+		s.PreviousJustifiedEpoch, s.PreviousJustifiedEpochHash, s.VoteEpoch, s.VoteEpochStartSlot)
+	return totalStr
 }

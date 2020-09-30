@@ -7,14 +7,15 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"fmt"
+	"github.com/multiformats/go-multiaddr"
 	"github.com/olympus-protocol/ogen/api/proto"
 	"github.com/olympus-protocol/ogen/internal/blockdb"
 	"github.com/olympus-protocol/ogen/internal/chainindex"
 	"github.com/olympus-protocol/ogen/internal/keystore"
-	"github.com/olympus-protocol/ogen/internal/logger"
 	"github.com/olympus-protocol/ogen/internal/server"
 	"github.com/olympus-protocol/ogen/internal/state"
 	"github.com/olympus-protocol/ogen/pkg/bls"
+	"github.com/olympus-protocol/ogen/pkg/logger"
 	"github.com/olympus-protocol/ogen/pkg/primitives"
 	testdata "github.com/olympus-protocol/ogen/test"
 	"github.com/stretchr/testify/assert"
@@ -35,7 +36,7 @@ const NumValidators = 10
 var folders = make([]string, NumNodes)
 var loggers = make([]logger.Logger, NumNodes)
 
-var validatorsKeys []*bls.SecretKey
+var validatorsKeys = make(map[int][]*bls.SecretKey)
 var initParams state.InitializationParameters
 
 var keystores = make([]keystore.Keystore, NumNodes)
@@ -49,7 +50,7 @@ var receivingAddr, _ = bls.SecretKeyFromBytes(receivingBytes)
 
 var walletsPass = "wallet_secure_password"
 
-var params = testdata.TestParams
+var params = &testdata.TestParams
 var delaySeconds int64 = 30
 
 const dataFolder = "./chain_test"
@@ -79,7 +80,7 @@ func createKeystoresAndValidators() {
 				panic(err)
 			}
 			loggers[index] = logger.New(logFile)
-			keystores[index] = keystore.NewKeystore(folder, loggers[index])
+			keystores[index] = keystore.NewKeystore(folder)
 		}(i, folder, &folderWg)
 	}
 	folderWg.Wait()
@@ -87,10 +88,12 @@ func createKeystoresAndValidators() {
 	// Initialize each keystore with NumValidators
 	var keystoreWg sync.WaitGroup
 	keystoreWg.Add(len(keystores))
-	var keys [][]*bls.SecretKey
-	for _, ks := range keystores {
-		go func(keystore keystore.Keystore, wg *sync.WaitGroup) {
+	var keysLock sync.RWMutex
+	for i, ks := range keystores {
+		go func(index int, keystore keystore.Keystore, wg *sync.WaitGroup, lock *sync.RWMutex) {
+			lock.Lock()
 			defer wg.Done()
+			defer lock.Unlock()
 			err := keystore.CreateKeystore()
 			if err != nil {
 				panic(err)
@@ -99,27 +102,27 @@ func createKeystoresAndValidators() {
 			if err != nil {
 				panic(err)
 			}
-			keys = append(keys, ksvalidators)
+			validatorsKeys[index] = ksvalidators
 			err = keystore.Close()
 			if err != nil {
 				panic(err)
 			}
-		}(ks, &keystoreWg)
+		}(i, ks, &keystoreWg, &keysLock)
 	}
-	keystoreWg.Wait()
 
-	for _, kslice := range keys {
-		validatorsKeys = append(validatorsKeys, kslice...)
-	}
+	keystoreWg.Wait()
 }
 
 func createInitializationParams() {
 
-	valInit := make([]state.ValidatorInitialization, NumNodes*NumValidators)
-	for i, key := range validatorsKeys {
-		valInit[i] = state.ValidatorInitialization{
-			PubKey:       hex.EncodeToString(key.PublicKey().Marshal()),
-			PayeeAddress: premineAddr.PublicKey().ToAccount(),
+	var valInit []state.ValidatorInitialization
+	for _, kslice := range validatorsKeys {
+		for _, key := range kslice {
+			val := state.ValidatorInitialization{
+				PubKey:       hex.EncodeToString(key.PublicKey().Marshal()),
+				PayeeAddress: premineAddr.PublicKey().ToAccount(),
+			}
+			valInit = append(valInit, val)
 		}
 
 	}
@@ -146,7 +149,6 @@ func createServers() {
 			config := &server.GlobalConfig{
 				DataFolder:   folder,
 				NetworkName:  "",
-				InitialNodes: nil,
 				Port:         strconv.Itoa(24000 + index),
 				InitConfig:   state.InitializationParameters{},
 				RPCProxy:     false,
@@ -159,7 +161,7 @@ func createServers() {
 				LogFile:      false,
 				Pprof:        false,
 			}
-			s, err := server.NewServer(context.Background(), config, log, params, db, initParams)
+			s, err := server.NewServer(context.Background(), config, log, &params, db, initParams)
 			if err != nil {
 				panic(err)
 			}

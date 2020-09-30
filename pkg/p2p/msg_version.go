@@ -2,11 +2,17 @@ package p2p
 
 // MsgVersion is the struct that contains the node information during the version handshake.
 type MsgVersion struct {
-	TipSlot            uint64   // 8 bytes
-	Nonce              uint64   // 8 bytes
-	Timestamp          uint64   // 8 bytes
-	LastJustifiedHash  [32]byte // 32 bytes
-	LastJustifiedEpoch uint64   // 8 bytes
+	Tip             uint64
+	TipSlot         uint64
+	TipHash         [32]byte
+	Nonce           uint64
+	Timestamp       uint64
+	JustifiedSlot   uint64
+	JustifiedHeight uint64
+	JustifiedHash   [32]byte
+	FinalizedSlot   uint64
+	FinalizedHeight uint64
+	FinalizedHash   [32]byte
 }
 
 // Marshal serializes the data to bytes
@@ -26,5 +32,5 @@ func (m *MsgVersion) Command() string {
 
 // MaxPayloadLength returns the maximum size of the MsgVersion message.
 func (m *MsgVersion) MaxPayloadLength() uint64 {
-	return 64
+	return 240
 }

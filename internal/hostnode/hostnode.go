@@ -2,43 +2,41 @@ package hostnode
 
 import (
 	"context"
-	"net"
+	"crypto/rand"
+	"github.com/olympus-protocol/ogen/pkg/p2p"
+	"github.com/olympus-protocol/ogen/pkg/params"
+	"io/ioutil"
+	"os"
+	"path"
 	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/olympus-protocol/ogen/internal/chain"
-	"github.com/olympus-protocol/ogen/internal/logger"
+	"github.com/olympus-protocol/ogen/pkg/logger"
 
-	"github.com/libp2p/go-libp2p-peerstore/pstoremem"
+	circuit "github.com/libp2p/go-libp2p-circuit"
+	"github.com/libp2p/go-libp2p-peerstore/pstoreds"
 
+	dsbadger "github.com/ipfs/go-ds-badger"
+	"github.com/libp2p/go-libp2p-connmgr"
 	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/multiformats/go-multiaddr"
-	mnet "github.com/multiformats/go-multiaddr-net"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 type Config struct {
-	Log          logger.Logger
-	Port         string
-	InitialNodes []peer.AddrInfo
-	Path         string
-	PrivateKey   crypto.PrivKey
+	Log  logger.Logger
+	Port string
+	Path string
 }
-
-const (
-	OgenVersion       = "0.0.1"
-	timeoutInterval   = 60 * time.Second
-	heartbeatInterval = 20 * time.Second
-)
 
 // HostNode is an interface for hostNode
 type HostNode interface {
-	SyncProtocol() SyncProtocol
 	Topic(topic string) (*pubsub.Topic, error)
 	Syncing() bool
 	GetContext() context.Context
@@ -55,9 +53,7 @@ type HostNode interface {
 	Stop()
 	Start() error
 	SetStreamHandler(id protocol.ID, handleStream func(s network.Stream))
-	Database() Database
 	GetPeerInfo(id peer.ID) *peer.AddrInfo
-	SavePeer(pinfo peer.AddrInfo) error
 }
 
 var _ HostNode = &hostNode{}
@@ -75,75 +71,70 @@ type hostNode struct {
 	topics     map[string]*pubsub.Topic
 	topicsLock sync.RWMutex
 
-	timeoutInterval   time.Duration
-	heartbeatInterval time.Duration
-
 	netMagic uint32
 
-	log logger.Logger
+	log  logger.Logger
+	path string
 
 	// discoveryProtocol handles peer discovery (mDNS, DHT, etc)
 	discoveryProtocol DiscoveryProtocol
 
 	// syncProtocol handles peer syncing
 	syncProtocol SyncProtocol
-	db           Database
 }
 
 // NewHostNode creates a host node
-func NewHostNode(ctx context.Context, config Config, blockchain chain.Blockchain, netMagic uint32) (HostNode, error) {
+func NewHostNode(ctx context.Context, config Config, blockchain chain.Blockchain, p *params.ChainParams) (HostNode, error) {
 
 	node := &hostNode{
-		ctx:               ctx,
-		timeoutInterval:   timeoutInterval,
-		heartbeatInterval: heartbeatInterval,
-		log:               config.Log,
-		topics:            map[string]*pubsub.Topic{},
-		netMagic:          netMagic,
+		ctx:      ctx,
+		log:      config.Log,
+		topics:   map[string]*pubsub.Topic{},
+		netMagic: p.NetMagic,
+		path:     config.Path,
 	}
 
-	ps := pstoremem.NewPeerstore()
-
-	db, err := NewDatabase(config.Path, node)
-	if err != nil {
-		return nil, err
-	}
-	node.db = db
-
-	priv, err := db.GetPrivKey()
+	ds, err := dsbadger.NewDatastore(path.Join(config.Path, "peerstore"), nil)
 	if err != nil {
 		return nil, err
 	}
 
+	ps, err := pstoreds.NewPeerstore(node.ctx, ds, pstoreds.DefaultOpts())
+	if err != nil {
+		return nil, err
+	}
+
+	priv, err := node.loadPrivateKey()
+	if err != nil {
+		return nil, err
+	}
 	node.privateKey = priv
 
-	netAddr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:"+config.Port)
+	listenAddress, err := ma.NewMultiaddr("/ip4/0.0.0.0/tcp/" + config.Port)
 	if err != nil {
 		return nil, err
 	}
 
-	listen, err := mnet.FromNetAddr(netAddr)
-	if err != nil {
-		return nil, err
-	}
-	listenAddress := []multiaddr.Multiaddr{listen}
+	connman := connmgr.NewConnManager(2, 64, time.Second*60)
 
 	h, err := libp2p.New(
 		ctx,
-		libp2p.ListenAddrs(listenAddress...),
+		libp2p.ListenAddrs([]ma.Multiaddr{listenAddress}...),
 		libp2p.Identity(priv),
-		libp2p.EnableRelay(),
+		libp2p.EnableRelay(circuit.OptActive, circuit.OptHop),
+		libp2p.NATPortMap(),
 		libp2p.Peerstore(ps),
+		libp2p.ConnectionManager(connman),
 	)
-
 	if err != nil {
 		return nil, err
 	}
+
 	node.host = h
 
 	addrs, err := peer.AddrInfoToP2pAddrs(&peer.AddrInfo{
 		ID:    h.ID(),
-		Addrs: listenAddress,
+		Addrs: []ma.Multiaddr{listenAddress},
 	})
 	if err != nil {
 		return nil, err
@@ -159,7 +150,7 @@ func NewHostNode(ctx context.Context, config Config, blockchain chain.Blockchain
 	}
 	node.gossipSub = g
 
-	discovery, err := NewDiscoveryProtocol(ctx, node, config)
+	discovery, err := NewDiscoveryProtocol(ctx, node, config, p)
 	if err != nil {
 		return nil, err
 	}
@@ -181,19 +172,75 @@ func (node *hostNode) SyncProtocol() SyncProtocol {
 func (node *hostNode) Topic(topic string) (*pubsub.Topic, error) {
 	node.topicsLock.Lock()
 	defer node.topicsLock.Unlock()
+
 	if t, ok := node.topics[topic]; ok {
 		return t, nil
 	}
+
 	t, err := node.gossipSub.Join(topic)
 	if err != nil {
 		return nil, err
 	}
-	_, err = t.Relay()
-	if err != nil {
-		return nil, err
-	}
+
+	node.relay(topic, t)
+
 	node.topics[topic] = t
 	return t, nil
+}
+
+func (node *hostNode) relay(topic string, pub *pubsub.Topic) {
+	switch topic {
+	case p2p.MsgBlockCmd:
+		_, err := pub.Relay()
+		if err != nil {
+			node.log.Error(err)
+		}
+	case p2p.MsgTxCmd:
+		_, err := pub.Relay()
+		if err != nil {
+			node.log.Error(err)
+		}
+	case p2p.MsgTxMultiCmd:
+		_, err := pub.Relay()
+		if err != nil {
+			node.log.Error(err)
+		}
+	case p2p.MsgDepositCmd:
+		_, err := pub.Relay()
+		if err != nil {
+			node.log.Error(err)
+		}
+	case p2p.MsgDepositsCmd:
+		_, err := pub.Relay()
+		if err != nil {
+			node.log.Error(err)
+		}
+	case p2p.MsgExitCmd:
+		_, err := pub.Relay()
+		if err != nil {
+			node.log.Error(err)
+		}
+	case p2p.MsgExitsCmd:
+		_, err := pub.Relay()
+		if err != nil {
+			node.log.Error(err)
+		}
+	case p2p.MsgGovernanceCmd:
+		_, err := pub.Relay()
+		if err != nil {
+			node.log.Error(err)
+		}
+	case p2p.MsgVoteCmd:
+		_, err := pub.Relay()
+		if err != nil {
+			node.log.Error(err)
+		}
+	case p2p.MsgValidatorStartCmd:
+		_, err := pub.Relay()
+		if err != nil {
+			node.log.Error(err)
+		}
+	}
 }
 
 // Syncing returns a boolean if the chain is on sync mode
@@ -292,26 +339,41 @@ func (node *hostNode) Start() error {
 	return nil
 }
 
-func (node *hostNode) Database() Database {
-	return node.db
-}
-
 func (node *hostNode) GetPeerInfo(id peer.ID) *peer.AddrInfo {
 	pinfo := node.host.Peerstore().PeerInfo(id)
 	return &pinfo
 }
 
-func (node *hostNode) SavePeer(pinfo peer.AddrInfo) error {
-	err := node.db.SavePeer(pinfo)
+func (node *hostNode) loadPrivateKey() (crypto.PrivKey, error) {
+	keyBytes, err := ioutil.ReadFile(path.Join(node.path, "node_key.dat"))
 	if err != nil {
-		return err
+		return node.createPrivateKey()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancel()
-	err = node.host.Connect(ctx, pinfo)
+
+	key, err := crypto.UnmarshalPrivateKey(keyBytes)
 	if err != nil {
-		cancel()
-		return err
+		return node.createPrivateKey()
 	}
-	return nil
+	return key, nil
+}
+
+func (node *hostNode) createPrivateKey() (crypto.PrivKey, error) {
+	_ = os.RemoveAll(path.Join(node.path, "node_key.dat"))
+
+	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+
+	keyBytes, err := crypto.MarshalPrivateKey(priv)
+	if err != nil {
+		return nil, err
+	}
+
+	err = ioutil.WriteFile(path.Join(node.path, "node_key.dat"), keyBytes, 0700)
+	if err != nil {
+		return nil, err
+	}
+
+	return priv, nil
 }

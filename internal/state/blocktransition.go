@@ -568,10 +568,12 @@ func (s *state) ApplyExit(exit *primitives.Exit) error {
 
 // IsDepositValid validates signatures and ensures that a deposit is valid.
 func (s *state) IsDepositValid(deposit *primitives.Deposit, params *params.ChainParams) error {
+
 	err := allocate.Zero(deposit)
 	if err != nil {
 		return err
 	}
+
 	dPub, err := deposit.GetPublicKey()
 	if err != nil {
 		return err
@@ -580,6 +582,7 @@ func (s *state) IsDepositValid(deposit *primitives.Deposit, params *params.Chain
 	if err != nil {
 		return err
 	}
+
 	if s.CoinsState.Balances[pkh] < params.DepositAmount*params.UnitsPerCoin {
 		return fmt.Errorf("balance is too low for deposit (got: %d, expected at least: %d)", s.CoinsState.Balances[pkh], params.DepositAmount*params.UnitsPerCoin)
 	}
@@ -671,6 +674,29 @@ var (
 	ErrorVoteSignature = errors.New("vote aggregate signature did not validate")
 )
 
+func (s *state) GetParticipateInfo(v *primitives.MultiValidatorVote, p *params.ChainParams) (string, error) {
+	validators, err := s.GetVoteCommittee(v.Data.Slot, p)
+	if err != nil {
+		return "", err
+	}
+
+	participants := fmt.Sprintf("VoteHash:[%s]=", v.Data.Hash())
+	for i, validatorIdx := range validators {
+		if !v.ParticipationBitfield.Get(uint(i)) {
+			continue
+		}
+
+		_, err := bls.PublicKeyFromBytes(s.ValidatorRegistry[validatorIdx].PubKey[:])
+		if err != nil {
+			return "", err
+		}
+		votingValidator := s.ValidatorRegistry[validatorIdx]
+		validatorLog := fmt.Sprintf("[Participants ==%d]", i) + votingValidator.ToString()
+		participants = participants + validatorLog + "\n"
+	}
+	return participants, nil
+}
+
 // IsVoteValid checks if a vote is valid.
 func (s *state) IsVoteValid(v *primitives.MultiValidatorVote, p *params.ChainParams) error {
 	err := allocate.Zero(v)
@@ -713,6 +739,7 @@ func (s *state) IsVoteValid(v *primitives.MultiValidatorVote, p *params.ChainPar
 		if !v.ParticipationBitfield.Get(uint(i)) {
 			continue
 		}
+
 		pub, err := bls.PublicKeyFromBytes(s.ValidatorRegistry[validatorIdx].PubKey[:])
 		if err != nil {
 			return err

@@ -8,10 +8,10 @@ import (
 	"github.com/olympus-protocol/ogen/internal/actionmanager"
 	"github.com/olympus-protocol/ogen/internal/chain"
 	"github.com/olympus-protocol/ogen/internal/hostnode"
-	"github.com/olympus-protocol/ogen/internal/logger"
 	"github.com/olympus-protocol/ogen/internal/state"
 	"github.com/olympus-protocol/ogen/pkg/bls"
 	"github.com/olympus-protocol/ogen/pkg/chainhash"
+	"github.com/olympus-protocol/ogen/pkg/logger"
 	"github.com/olympus-protocol/ogen/pkg/p2p"
 	"github.com/olympus-protocol/ogen/pkg/params"
 	"github.com/olympus-protocol/ogen/pkg/primitives"
@@ -97,18 +97,6 @@ func (m *voteMempool) Add(vote *primitives.MultiValidatorVote) {
 	currentState, err := m.blockchain.State().TipStateAtSlot(firstSlotAllowedToInclude)
 	if err != nil {
 		m.log.Error(err)
-		return
-	}
-
-	committee, err := currentState.GetVoteCommittee(vote.Data.Slot, m.params)
-	if err != nil {
-		m.log.Error(err)
-		return
-	}
-
-	// Votes participation fields should have the same length as the current state validator registry size.
-	if (vote.ParticipationBitfield.Len()) != uint64(len(committee)) {
-		m.log.Error("wrong vote participation field size")
 		return
 	}
 
@@ -332,10 +320,11 @@ func (m *voteMempool) handleSubscription(sub *pubsub.Subscription, id peer.ID) {
 		if err != nil {
 			if err != m.ctx.Err() {
 				m.log.Warnf("error getting next message in votes topic: %s", err)
-				return
+				continue
 			}
 			return
 		}
+
 		if msg.GetFrom() == id {
 			continue
 		}
@@ -345,13 +334,13 @@ func (m *voteMempool) handleSubscription(sub *pubsub.Subscription, id peer.ID) {
 		voteRead, err := p2p.ReadMessage(buf, m.hostNode.GetNetMagic())
 		if err != nil {
 			m.log.Warnf("unable to decode message: %s", err)
-			return
+			continue
 		}
 
 		voteMsg, ok := voteRead.(*p2p.MsgVote)
 		if !ok {
 			m.log.Warnf("peer sent wrong message on vote subscription")
-			return
+			continue
 		}
 
 		vote := voteMsg.Data
@@ -362,24 +351,25 @@ func (m *voteMempool) handleSubscription(sub *pubsub.Subscription, id peer.ID) {
 		tip := m.blockchain.State().Tip()
 
 		if tip.Slot+m.params.EpochLength*2 < firstSlotAllowedToInclude {
-			return
+			continue
 		}
 
 		view, err := m.blockchain.State().GetSubView(tip.Hash)
 		if err != nil {
 			m.log.Warnf("could not get block view representing current tip: %s", err)
-			return
+			continue
 		}
 
 		currentState, _, err := m.blockchain.State().GetStateForHashAtSlot(tip.Hash, firstSlotAllowedToInclude, &view, m.params)
 		if err != nil {
 			m.log.Warnf("error updating chain to attestation inclusion slot: %s", err)
-			return
+			continue
 		}
 
 		err = m.AddValidate(vote, currentState)
 		if err != nil {
 			m.log.Debugf("error adding vote to mempool: %s", err)
+			continue
 		}
 	}
 }

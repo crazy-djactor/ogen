@@ -1,5 +1,7 @@
 package primitives
 
+import "fmt"
+
 const (
 	// StatusStarting is when the validator is waiting to join.
 	StatusStarting uint64 = iota
@@ -73,4 +75,17 @@ func (v *Validator) Unmarshal(b []byte) error {
 // Copy returns a copy of the validator.
 func (v *Validator) Copy() Validator {
 	return *v
+}
+
+//Balance          uint64
+//PubKey           [48]byte
+//PayeeAddress     [20]byte
+//Status           uint64
+//FirstActiveEpoch uint64
+//LastActiveEpoch  uint64
+func (v *Validator) ToString() string {
+	totalStr := fmt.Sprintf("Validator={ Balance: [%d], PubKey: [%v], PayeeAddress: [%v], Status: [%d], "+
+		"FirstActiveEpoch: [%d], LastActiveEpoch: [%d]", v.Balance, v.PubKey, v.PayeeAddress, v.Status,
+		v.FirstActiveEpoch, v.LastActiveEpoch)
+	return totalStr
 }

@@ -39,7 +39,7 @@ func (ch *blockchain) UpdateChainHead(possible chainhash.Hash) error {
 				return 0
 			}
 			if node.Hash.IsEqual(&block.Hash) {
-				votes += justifiedState.GetEffectiveBalance(target.validator, &ch.params) / 1e8
+				votes += justifiedState.GetEffectiveBalance(target.validator, ch.params) / 1e8
 			}
 		}
 		return votes
@@ -105,7 +105,7 @@ func (ch *blockchain) ProcessBlock(block *primitives.Block) error {
 	blockTime := ch.genesisTime.Add(time.Second * time.Duration(ch.params.SlotDuration*block.Header.Slot))
 
 	blockHash := block.Hash()
-	ch.log.Infof("<<ProcessBlock at slot[%d] last:[%v]", block.Header.Slot, block.Header.PrevBlockHash)
+	ch.log.Infof("****ProcessBlock at slot[%d] last:[%v]", block.Header.Slot, block.Header.PrevBlockHash)
 	if other, found := ch.State().Chain().GetNodeBySlot(block.Header.Slot); found && other.Slot == block.Header.Slot {
 		if other.Hash.IsEqual(&blockHash) {
 			return nil
@@ -118,12 +118,12 @@ func (ch *blockchain) ProcessBlock(block *primitives.Block) error {
 			return err
 		}
 
-		lastBlockState, _, err := ch.State().GetStateForHashAtSlot(lastBlockHash, block.Header.Slot, &view, &ch.params)
+		lastBlockState, _, err := ch.State().GetStateForHashAtSlot(lastBlockHash, block.Header.Slot, &view, ch.params)
 		if err != nil {
 			return err
 		}
 
-		if err := lastBlockState.CheckBlockSignature(block, &ch.params); err != nil {
+		if err := lastBlockState.CheckBlockSignature(block, ch.params); err != nil {
 			return err
 		}
 
@@ -132,7 +132,7 @@ func (ch *blockchain) ProcessBlock(block *primitives.Block) error {
 			return err
 		}
 
-		proposerPub, err := lastBlockState.GetProposerPublicKey(block, &ch.params)
+		proposerPub, err := lastBlockState.GetProposerPublicKey(block, ch.params)
 		if err != nil {
 			return err
 		}
@@ -165,9 +165,9 @@ func (ch *blockchain) ProcessBlock(block *primitives.Block) error {
 		}
 		return nil
 	}
-	ch.log.Infof("<<ProcessBlock2 not duplicated at slot[%d] last:[%v]", block.Header.Slot, block.Header.PrevBlockHash)
+	ch.log.Infof("****ProcessBlock not duplicated at slot[%d] last:[%v]", block.Header.Slot, block.Header.PrevBlockHash)
 	if time.Now().Add(time.Second * 2).Before(blockTime) {
-		ch.log.Infof("block %d processed at %s, but should wait until %s", block.Header.Slot, time.Now(), blockTime)
+		ch.log.Infof("****ProcessBlock block %d processed at %s, but should wait until %s", block.Header.Slot, time.Now(), blockTime)
 		return fmt.Errorf("block %d processed at %s, but should wait until %s", block.Header.Slot, time.Now(), blockTime)
 	}
 
@@ -182,7 +182,7 @@ func (ch *blockchain) ProcessBlock(block *primitives.Block) error {
 	if len(receipts) > 0 {
 		msg := "\nEpoch Receipts\n----------\n"
 		receiptTypes := make(map[string]int64)
-		ch.log.Infof("<<ProcessBlock3 recepts > 0")
+		ch.log.Infof("****ProcessBlock recepts > 0 {%v}", receipts)
 		for _, r := range receipts {
 			if _, ok := receiptTypes[r.TypeString()]; !ok {
 				receiptTypes[r.TypeString()] = r.Amount
@@ -208,14 +208,12 @@ func (ch *blockchain) ProcessBlock(block *primitives.Block) error {
 	if err != nil {
 		return err
 	}
-	ch.log.Infof("<<ProcessBlock4 AddRawBlock [%v]", block.Hash())
 
 	row, err := ch.state.Index().Add(*block)
 	if err != nil {
 		return err
 	}
 
-	ch.log.Infof("<<ProcessBlock5 SetBlockRaw hash:[%v]", row.Hash)
 	// set current block row in database
 	if err := ch.db.SetBlockRow(row.ToBlockNodeDisk()); err != nil {
 		return err
@@ -226,17 +224,15 @@ func (ch *blockchain) ProcessBlock(block *primitives.Block) error {
 		return err
 	}
 
-	ch.log.Infof("<<ProcessBlock6 Update Parent BlockRow hash:[%v]", row.Hash)
 	for _, a := range block.Votes {
-		validators, err := newState.GetVoteCommittee(a.Data.Slot, &ch.params)
+		validators, err := newState.GetVoteCommittee(a.Data.Slot, ch.params)
 		if err != nil {
 			return err
 		}
 
-		ch.State().SetLatestVotesIfNeeded(validators, a)
+		ch.state.SetLatestVotesIfNeeded(validators, a)
 	}
 
-	// TODO: remove when we have fork choice
 	if err := ch.UpdateChainHead(blockHash); err != nil {
 		return err
 	}
@@ -251,11 +247,10 @@ func (ch *blockchain) ProcessBlock(block *primitives.Block) error {
 	if err != nil {
 		return err
 	}
-	finalizedState, found := ch.State().GetStateForHash(finalizedHash)
+	finalizedState, found := ch.state.GetStateForHash(finalizedHash)
 	if !found {
 		return fmt.Errorf("could not find finalized state with hash %s in state map", finalizedHash)
 	}
-	ch.log.Infof("<<ProcessBlock7 newState: Finalized slot[] hash:[%v]", finalizedSlot, finalizedHash)
 	if err := ch.db.SetFinalizedHead(finalizedHash); err != nil {
 		return err
 	}
@@ -268,33 +263,25 @@ func (ch *blockchain) ProcessBlock(block *primitives.Block) error {
 
 	ch.state.RemoveBeforeSlot(newState.GetFinalizedEpoch() * ch.params.EpochLength)
 
-	ch.log.Infof("<<ProcessBlock8 newState: JustifiedEpoch hash:[%v]", newState.GetJustifiedEpochHash())
 	justifiedState, found := ch.state.GetStateForHash(newState.GetJustifiedEpochHash())
 	if !found {
-		ch.log.Infof("<<ProcessBlock8-1 could not find justified state with hash %s in state map", newState.GetJustifiedEpochHash())
 		return fmt.Errorf("could not find justified state with hash %s in state map", newState.GetJustifiedEpochHash())
 	}
 	if err := ch.db.SetJustifiedHead(newState.GetJustifiedEpochHash()); err != nil {
-		ch.log.Infof("<<ProcessBlock8-2 SetDBJustifiedHead [%v] FAILED", newState.GetJustifiedEpochHash())
 		return err
 	}
 	if err := ch.state.SetJustifiedHead(newState.GetJustifiedEpochHash(), justifiedState); err != nil {
-		ch.log.Infof("<<ProcessBlock8-3 SetStateJustifiedHead [%v] FAILED", newState.GetJustifiedEpochHash())
 		return err
 	}
 	if err := ch.db.SetJustifiedState(justifiedState); err != nil {
-		ch.log.Infof("<<ProcessBlock8-4 SetDBJustifiedState [%v] FAILED", newState.GetJustifiedEpochHash())
 		return err
 	}
 
 	// TODO: delete state before finalized
 
-	ch.log.Infof("<<ProcessBlock9==processed %d votes %d deposits %d exits and %d transactions",
-		len(block.Votes), len(block.Deposits), len(block.Exits), len(block.Txs))
-	ch.log.Infof("<<ProcessBlock9==included %d vote slashing %d randao slashing %d proposer slashing",
-		len(block.VoteSlashings), len(block.RANDAOSlashings), len(block.ProposerSlashings))
-	ch.log.Infof("<<ProcessBlock9==new block at slot: %d with %d finalized and %d justified",
-		block.Header.Slot, newState.GetFinalizedEpoch(), newState.GetJustifiedEpoch())
+	ch.log.Debugf("processed %d votes %d deposits %d exits and %d transactions", len(block.Votes), len(block.Deposits), len(block.Exits), len(block.Txs))
+	ch.log.Debugf("included %d vote slashing %d randao slashing %d proposer slashing", len(block.VoteSlashings), len(block.RANDAOSlashings), len(block.ProposerSlashings))
+	ch.log.Infof("new block at slot: %d with %d finalized and %d justified", block.Header.Slot, newState.GetFinalizedEpoch(), newState.GetJustifiedEpoch())
 
 	voted := 0
 
@@ -302,11 +289,10 @@ func (ch *blockchain) ProcessBlock(block *primitives.Block) error {
 		voted += len(v.ParticipationBitfield.BitIndices())
 	}
 
-	comittee, err := newState.GetVoteCommittee(block.Header.Slot, &ch.params)
+	comittee, err := newState.GetVoteCommittee(block.Header.Slot, ch.params)
 	if err == nil {
 		percentage := fmt.Sprintf("%.2f", float64(voted)/float64(len(comittee))*100)
-		ch.log.Infof("network participation with %d votes participating %d validators expected %d percentage %s%%",
-			len(block.Votes), voted, len(comittee), percentage)
+		ch.log.Infof("network participation with %d votes participating %d validators expected %d percentage %s%%", len(block.Votes), voted, len(comittee), percentage)
 	}
 
 	ch.notifeeLock.RLock()
